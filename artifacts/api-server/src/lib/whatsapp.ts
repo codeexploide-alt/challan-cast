@@ -7,6 +7,7 @@ import makeWASocket, {
 import { Boom } from "@hapi/boom";
 import path from "path";
 import { fileURLToPath } from "url";
+import fs from "fs";
 import { logger } from "./logger.js";
 import QRCode from "qrcode";
 import { EventEmitter } from "events";
@@ -23,6 +24,21 @@ interface WAState {
   socket: WASocket | null;
 }
 
+/** Delete all files inside the sessions directory so Baileys starts fresh. */
+function clearSessionFiles() {
+  try {
+    if (!fs.existsSync(SESSION_DIR)) return;
+    for (const f of fs.readdirSync(SESSION_DIR)) {
+      try {
+        fs.rmSync(path.join(SESSION_DIR, f), { recursive: true, force: true });
+      } catch { /* ignore individual file errors */ }
+    }
+    logger.info("Session files cleared");
+  } catch (err) {
+    logger.warn({ err }, "Could not clear session files");
+  }
+}
+
 class WhatsAppManager extends EventEmitter {
   private state: WAState = {
     status: "disconnected",
@@ -31,7 +47,7 @@ class WhatsAppManager extends EventEmitter {
     socket: null,
   };
 
-  // Prevent overlapping reconnect attempts
+  // Prevent overlapping connect attempts
   private reconnecting = false;
 
   getStatus() {
@@ -60,7 +76,7 @@ class WhatsAppManager extends EventEmitter {
       const { state, saveCreds } = await useMultiFileAuthState(SESSION_DIR);
       const { version } = await fetchLatestBaileysVersion();
 
-      // Only set to "connecting" if we don't already have a QR to display
+      // Only flip to "connecting" if we have no QR already visible
       if (this.state.status !== "qr_ready") {
         this.setState({ status: "connecting" });
       }
@@ -71,7 +87,6 @@ class WhatsAppManager extends EventEmitter {
         printQRInTerminal: false,
         logger: logger.child({ module: "baileys" }) as any,
         generateHighQualityLinkPreview: false,
-        // Anti-ban: appear as a normal mobile browser session
         markOnlineOnConnect: false,
         connectTimeoutMs: 60_000,
         defaultQueryTimeoutMs: 60_000,
@@ -89,7 +104,6 @@ class WhatsAppManager extends EventEmitter {
         if (qr) {
           try {
             const dataUrl = await QRCode.toDataURL(qr, { width: 300, margin: 2 });
-            // Always update QR without flickering — keep showing previous QR while new one loads
             this.setState({ status: "qr_ready", qrDataUrl: dataUrl });
             this.emit("qr", dataUrl);
             logger.info("QR code generated");
@@ -100,24 +114,27 @@ class WhatsAppManager extends EventEmitter {
 
         if (connection === "close") {
           const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
-          const isQrTimeout = statusCode === 408;
-          const isLoggedOut = statusCode === DisconnectReason.loggedOut;
+          const isQrTimeout  = statusCode === 408;
+          const isLoggedOut  = statusCode === DisconnectReason.loggedOut;
 
           logger.info({ statusCode, isQrTimeout, isLoggedOut }, "Connection closed");
 
           this.state.socket = null;
 
           if (isLoggedOut) {
-            // User explicitly logged out — clear everything
+            // WhatsApp server confirmed logout — clear session files and reconnect
+            // so the user immediately sees a fresh QR without any server restart
             this.setState({ status: "disconnected", phone: null, qrDataUrl: null });
             this.emit("disconnected");
+            clearSessionFiles();
+            logger.info("Logged out — will reconnect to show fresh QR in 1s");
+            setTimeout(() => this.connect(), 1000);
           } else if (isQrTimeout) {
-            // QR expired — keep the last QR visible and silently reconnect in bg
-            // Don't clear qrDataUrl so UI keeps showing the previous QR
+            // QR expired — keep the last QR visible and silently refresh
             logger.info("QR expired, silently reconnecting to get new QR...");
             setTimeout(() => this.connect(), 500);
           } else {
-            // Network/server error — reconnect without clearing QR if we had one
+            // Network/server error
             const hadQr = this.state.status === "qr_ready";
             if (!hadQr) {
               this.setState({ status: "disconnected", phone: null, qrDataUrl: null });
@@ -140,23 +157,34 @@ class WhatsAppManager extends EventEmitter {
       this.reconnecting = false;
       logger.error({ err }, "Failed to connect WhatsApp");
       this.setState({ status: "disconnected" });
-      // Retry after a pause
       setTimeout(() => this.connect(), 5000);
     }
   }
 
   async disconnect() {
+    // Reset the flag first so connect() can run again immediately after
+    this.reconnecting = false;
+
     if (this.state.socket) {
       try {
         await this.state.socket.logout();
       } catch {
-        // ignore
+        // logout() itself triggers the connection.update → isLoggedOut path,
+        // which calls clearSessionFiles + reconnect.
+        // If it throws we handle it below.
       }
       this.state.socket = null;
     }
-    this.setState({ status: "disconnected", phone: null, qrDataUrl: null });
-    this.emit("disconnected");
-    logger.info("WhatsApp disconnected");
+
+    // If logout() didn't fire the connection.update event (e.g. already offline),
+    // clean up manually and start a fresh QR session ourselves.
+    if (this.state.status !== "connecting" && this.state.status !== "qr_ready") {
+      this.setState({ status: "disconnected", phone: null, qrDataUrl: null });
+      this.emit("disconnected");
+      clearSessionFiles();
+      logger.info("WhatsApp disconnected — reconnecting for fresh QR");
+      setTimeout(() => this.connect(), 1000);
+    }
   }
 
   async sendMessage(
@@ -169,7 +197,6 @@ class WhatsAppManager extends EventEmitter {
     }
 
     // Normalize to full international JID
-    // 10-digit Indian numbers → prepend 91; already has country code → use as-is
     let normalized = to.replace(/\D/g, "");
     if (normalized.length === 10) {
       normalized = `91${normalized}`;
