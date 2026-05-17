@@ -1,0 +1,347 @@
+openapi: 3.1.0
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.1.0
+  description: E-Challan WhatsApp Broadcast API
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: session
+    description: WhatsApp session management
+  - name: broadcast
+    description: Broadcast operations
+  - name: upload
+    description: File upload operations
+
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  /session/status:
+    get:
+      operationId: getSessionStatus
+      tags: [session]
+      summary: Get WhatsApp session status
+      responses:
+        "200":
+          description: Session status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionStatus"
+
+  /session/qr:
+    get:
+      operationId: getQrCode
+      tags: [session]
+      summary: Get QR code for WhatsApp login
+      responses:
+        "200":
+          description: QR code data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QrCodeData"
+
+  /session/disconnect:
+    post:
+      operationId: disconnectSession
+      tags: [session]
+      summary: Disconnect WhatsApp session
+      responses:
+        "200":
+          description: Disconnected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /broadcast/start:
+    post:
+      operationId: startBroadcast
+      tags: [broadcast]
+      summary: Start a broadcast session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BroadcastInput"
+      responses:
+        "200":
+          description: Broadcast started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BroadcastSession"
+
+  /broadcast/stop:
+    post:
+      operationId: stopBroadcast
+      tags: [broadcast]
+      summary: Stop the current broadcast
+      responses:
+        "200":
+          description: Broadcast stopped
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /broadcast/status:
+    get:
+      operationId: getBroadcastStatus
+      tags: [broadcast]
+      summary: Get current broadcast status and progress
+      responses:
+        "200":
+          description: Broadcast status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BroadcastStatus"
+
+  /broadcast/history:
+    get:
+      operationId: getBroadcastHistory
+      tags: [broadcast]
+      summary: Get broadcast history list
+      responses:
+        "200":
+          description: List of past broadcasts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/BroadcastRecord"
+
+  /upload/csv:
+    post:
+      operationId: uploadCsv
+      tags: [upload]
+      summary: Upload CSV file with vehicle/mobile data
+      responses:
+        "200":
+          description: CSV parsed successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CsvParseResult"
+
+  /upload/apk:
+    post:
+      operationId: uploadApk
+      tags: [upload]
+      summary: Upload APK file for the broadcast template
+      responses:
+        "200":
+          description: APK uploaded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApkUploadResult"
+
+  /upload/apk/current:
+    get:
+      operationId: getCurrentApk
+      tags: [upload]
+      summary: Get the current APK file info
+      responses:
+        "200":
+          description: Current APK info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApkUploadResult"
+
+components:
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+        - status
+
+    SessionStatus:
+      type: object
+      properties:
+        connected:
+          type: boolean
+        phone:
+          type: ["string", "null"]
+        status:
+          type: string
+          enum: [connected, disconnected, connecting, qr_ready]
+      required:
+        - connected
+        - status
+
+    QrCodeData:
+      type: object
+      properties:
+        qr:
+          type: ["string", "null"]
+        status:
+          type: string
+      required:
+        - status
+
+    SuccessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+      required:
+        - success
+        - message
+
+    BroadcastInput:
+      type: object
+      properties:
+        challanNumber:
+          type: string
+        violation:
+          type: string
+        amount:
+          type: string
+        apkUrl:
+          type: ["string", "null"]
+        csvSessionId:
+          type: string
+      required:
+        - challanNumber
+        - violation
+        - amount
+        - csvSessionId
+
+    BroadcastSession:
+      type: object
+      properties:
+        id:
+          type: string
+        total:
+          type: integer
+        status:
+          type: string
+      required:
+        - id
+        - total
+        - status
+
+    BroadcastStatus:
+      type: object
+      properties:
+        active:
+          type: boolean
+        id:
+          type: ["string", "null"]
+        total:
+          type: integer
+        sent:
+          type: integer
+        failed:
+          type: integer
+        status:
+          type: string
+          enum: [idle, running, stopped, completed]
+        currentNumber:
+          type: ["string", "null"]
+        startedAt:
+          type: ["string", "null"]
+      required:
+        - active
+        - total
+        - sent
+        - failed
+        - status
+
+    BroadcastRecord:
+      type: object
+      properties:
+        id:
+          type: string
+        startedAt:
+          type: string
+        endedAt:
+          type: ["string", "null"]
+        total:
+          type: integer
+        sent:
+          type: integer
+        failed:
+          type: integer
+        status:
+          type: string
+        violation:
+          type: string
+        amount:
+          type: string
+      required:
+        - id
+        - startedAt
+        - total
+        - sent
+        - failed
+        - status
+        - violation
+        - amount
+
+    CsvParseResult:
+      type: object
+      properties:
+        sessionId:
+          type: string
+        total:
+          type: integer
+        preview:
+          type: array
+          items:
+            $ref: "#/components/schemas/VehicleRecord"
+      required:
+        - sessionId
+        - total
+        - preview
+
+    VehicleRecord:
+      type: object
+      properties:
+        vehicleNo:
+          type: string
+        mobile:
+          type: string
+      required:
+        - vehicleNo
+        - mobile
+
+    ApkUploadResult:
+      type: object
+      properties:
+        filename:
+          type: ["string", "null"]
+        url:
+          type: ["string", "null"]
+        uploadedAt:
+          type: ["string", "null"]
+      required:
+        - filename
+        - url
+        - uploadedAt

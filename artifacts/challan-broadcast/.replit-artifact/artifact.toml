@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "E-Challan Broadcast"
+version = "1.0.0"
+id = "artifacts/challan-broadcast"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 23089
+
+[services.development]
+run = "pnpm --filter @workspace/challan-broadcast run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/challan-broadcast", "run", "build" ]
+publicDir = "artifacts/challan-broadcast/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "23089"
+BASE_PATH = "/"
